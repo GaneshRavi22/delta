@@ -223,42 +223,43 @@ case class MergeIntoCommand(
     val targetOnlyPredicates =
       splitConjunctivePredicates(condition).filter(_.references.subsetOf(target.outputSet))
     val dataSkippedFiles = deltaTxn.filterFiles(targetOnlyPredicates)
+    dataSkippedFiles
 
-    // Apply inner join to between source and target using the merge condition to find matches
-    // In addition, we attach two columns
-    // - a monotonically increasing row id for target rows to later identify whether the same
-    //     target row is modified by multiple user or not
-    // - the target file name the row is from to later identify the files touched by matched rows
-    val joinToFindTouchedFiles = {
-      val sourceDF = Dataset.ofRows(spark, source)
-      val targetDF = Dataset.ofRows(spark, buildTargetPlanWithFiles(deltaTxn, dataSkippedFiles))
-        .withColumn(ROW_ID_COL, monotonically_increasing_id())
-        .withColumn(FILE_NAME_COL, input_file_name())
-      sourceDF.join(targetDF, new Column(condition), "inner")
-    }
-
-    // Process the matches from the inner join to record touched files and find multiple matches
-    val collectTouchedFiles = joinToFindTouchedFiles
-      .select(col(ROW_ID_COL), recordTouchedFileName(col(FILE_NAME_COL)).as("one"))
-
-    // Calculate frequency of matches per source row
-    val matchedRowCounts = collectTouchedFiles.groupBy(ROW_ID_COL).agg(sum("one").as("count"))
-    if (matchedRowCounts.filter("count > 1").count() != 0) {
-      throw DeltaErrors.multipleSourceRowMatchingTargetRowInMergeException(spark)
-    }
-
-    // Get the AddFiles using the touched file names.
-    val touchedFileNames = touchedFilesAccum.value.iterator().asScala.toSeq
-    logTrace(s"findTouchedFiles: matched files:\n\t${touchedFileNames.mkString("\n\t")}")
-
-    val nameToAddFileMap = generateCandidateFileMap(targetDeltaLog.dataPath, dataSkippedFiles)
-    val touchedAddFiles = touchedFileNames.map(f =>
-      getTouchedFile(targetDeltaLog.dataPath, f, nameToAddFileMap))
-
-    metrics("numTargetFilesBeforeSkipping") += deltaTxn.snapshot.numOfFiles
-    metrics("numTargetFilesAfterSkipping") += dataSkippedFiles.size
-    metrics("numTargetFilesRemoved") += touchedAddFiles.size
-    touchedAddFiles
+//    // Apply inner join to between source and target using the merge condition to find matches
+//    // In addition, we attach two columns
+//    // - a monotonically increasing row id for target rows to later identify whether the same
+//    //     target row is modified by multiple user or not
+//    // - the target file name the row is from to later identify the files touched by matched rows
+//    val joinToFindTouchedFiles = {
+//      val sourceDF = Dataset.ofRows(spark, source)
+//      val targetDF = Dataset.ofRows(spark, buildTargetPlanWithFiles(deltaTxn, dataSkippedFiles))
+//        .withColumn(ROW_ID_COL, monotonically_increasing_id())
+//        .withColumn(FILE_NAME_COL, input_file_name())
+//      sourceDF.join(targetDF, new Column(condition), "inner")
+//    }
+//
+//    // Process the matches from the inner join to record touched files and find multiple matches
+//    val collectTouchedFiles = joinToFindTouchedFiles
+//      .select(col(ROW_ID_COL), recordTouchedFileName(col(FILE_NAME_COL)).as("one"))
+//
+//    // Calculate frequency of matches per source row
+//    val matchedRowCounts = collectTouchedFiles.groupBy(ROW_ID_COL).agg(sum("one").as("count"))
+//    if (matchedRowCounts.filter("count > 1").count() != 0) {
+//      throw DeltaErrors.multipleSourceRowMatchingTargetRowInMergeException(spark)
+//    }
+//
+//    // Get the AddFiles using the touched file names.
+//    val touchedFileNames = touchedFilesAccum.value.iterator().asScala.toSeq
+//    logTrace(s"findTouchedFiles: matched files:\n\t${touchedFileNames.mkString("\n\t")}")
+//
+//    val nameToAddFileMap = generateCandidateFileMap(targetDeltaLog.dataPath, dataSkippedFiles)
+//    val touchedAddFiles = touchedFileNames.map(f =>
+//      getTouchedFile(targetDeltaLog.dataPath, f, nameToAddFileMap))
+//
+//    metrics("numTargetFilesBeforeSkipping") += deltaTxn.snapshot.numOfFiles
+//    metrics("numTargetFilesAfterSkipping") += dataSkippedFiles.size
+//    metrics("numTargetFilesRemoved") += touchedAddFiles.size
+//    touchedAddFiles
   }
 
   /**
